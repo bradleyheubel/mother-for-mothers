@@ -18,6 +18,9 @@ import {
 import * as splToken from '@solana/spl-token';
 import axios from "axios";
 
+// import { createJupiterApiClient } from '@jup-ag/api';
+// const jupiterQuoteApi = createJupiterApiClient();
+
 const splPubkeyMap: Record<string, [string, number]> = {
 ["MOTHER"]: ["3S8qX1MsMqRbiwKg2cQyx7nis1oHMgaCuc9c4VfvVdPN", 6],
 ["USDC"]: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6],
@@ -34,12 +37,12 @@ const successMsg = "Thank you for supporting your MOTHER!"
 export const GET = async (req: Request) => {
   try {
     const requestUrl = new URL(req.url);
-    const { toPubkey } = validatedQueryParams(requestUrl);
+    //const { toPubkey } = validatedQueryParams(requestUrl);
 
     const icon = `${requestUrl.origin}/mother.jpeg`
 
     const baseHref = new URL(
-      `/api/swap?to=${toPubkey.toBase58()}`,
+      `/api/swap?`,
       requestUrl.origin,
     ).toString();
 
@@ -74,7 +77,7 @@ export const GET = async (req: Request) => {
         actions: [
           {
             label: 'Donate', // button text
-            href: `${baseHref}&token={token}&amount={amount}`, // this href will have a text input
+            href: `${baseHref}token={token}&amount={amount}`, // this href will have a text input
             parameters: [
               {
                 type: "select",
@@ -108,12 +111,11 @@ export const GET = async (req: Request) => {
   }
 };
 
-
 export const OPTIONS = GET;
 
 export const POST = async (req: Request) => {
   const requestUrl = new URL(req.url);
-  const { token, amount, toPubkey } = validatedQueryParams(requestUrl);
+  const { token, amount } = validatedQueryParams(requestUrl);
 
   const body: ActionPostRequest = await req.json();
 
@@ -138,7 +140,7 @@ export const POST = async (req: Request) => {
     0, // note: simple accounts that just store native SOL have `0` bytes of data
   );
   if (amount * LAMPORTS_PER_SOL < minimumBalance) {
-    throw `account may not be rent exempt: ${toPubkey.toBase58()}`;
+    throw `account may not be rent exempt`;
   }
 
   let instructions = [];
@@ -146,53 +148,74 @@ export const POST = async (req: Request) => {
   if (token == "SOL"){
     console.log("SOL")
     console.log(splPubkeyMap["MOTHER"][0])
-        const quoteResponse = await (
-          await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${splPubkeyMap["MOTHER"][0]}&amount=${amount * LAMPORTS_PER_SOL}&slippageBps=50`
-          )
-        ).json();
 
-        console.log(quoteResponse)
+    let inputToken; 
+    if (token == "SOL") {
+      inputToken = "So11111111111111111111111111111111111111112"
+    } else {
+      inputToken = splPubkeyMap[token][0]
+    }
 
-        const { swapTransaction } = await (
-          await fetch('https://quote-api.jup.ag/v6/swap', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              // quoteResponse from /quote api
-              quoteResponse,
-              // user public key to be used for the swap
-              userPublicKey: account,
-              // auto wrap and unwrap SOL. default is true
-              wrapAndUnwrapSol: true,
-              // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
-              // feeAccount: "fee_account_public_key"
-              // asLegacyTransaction: true,
-            })
-          })
-        ).json();
-    console.log(swapTransaction)
-    //instructions.push(swapTransaction)
+    // const quote = await jupiterQuoteApi.quoteGet({
+    //   inputMint: inputToken,
+    //   outputMint: splPubkeyMap["MOTHER"][0],
+    //   amount: (amount * LAMPORTS_PER_SOL),
+    //   autoSlippage: true,
+    //   maxAutoSlippageBps: 500, // 5%,
+    // });
 
-      // create a legacy transaction
-  const transaction = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'))
-  // const transaction = new Transaction({
-  //   feePayer: account,
-  //   blockhash,
-  //   lastValidBlockHeight,
-  // }).add(...instructions);
-      
-  const payload: ActionPostResponse = await createPostResponse({
-    fields: {
-      transaction,
-      message: successMsg,
-    },
-  });
-  
-  return Response.json(payload, {
-    headers: ACTIONS_CORS_HEADERS,
-  });
+    // const swapResponse = await jupiterQuoteApi.swapPost({
+    //   swapRequest: {
+    //     quoteResponse: quote,
+    //     userPublicKey: body.account,
+    //     prioritizationFeeLamports: 'auto'
+    //   },
+    // })
+
+    const quoteResponse = await (
+      await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=${inputToken}&outputMint=3S8qX1MsMqRbiwKg2cQyx7nis1oHMgaCuc9c4VfvVdPN&amount=${amount * LAMPORTS_PER_SOL}&slippageBps=50`
+      )
+    ).json();
+    
+    // get serialized transactions for the swap
+    const { swapTransaction } = await (
+      await fetch('https://quote-api.jup.ag/v6/swap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          // quoteResponse from /quote api
+          quoteResponse,
+          // user public key to be used for the swap
+          userPublicKey: body.account,
+          // auto wrap and unwrap SOL. default is true
+          wrapAndUnwrapSol: true,
+          // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
+          // feeAccount: "fee_account_public_key"
+        })
+      })
+    ).json();
+
+    //console.log(swapResponse)
+    // const swapTransactionBuf = Buffer.from(swapResponse.swapTransaction, "base64");
+    // let transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+    // const serializedTransaction = Buffer.from(transaction.serialize());
+
+    const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
+
+    let transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+
+    const payload: ActionPostResponse = await createPostResponse({
+      fields: {
+        transaction: swapTransaction,
+        //message: successMsg,
+      },
+    });
+    
+    return Response.json(payload, {
+      headers: ACTIONS_CORS_HEADERS,
+    });
 
     // create an instruction to transfer native SOL from one wallet to another
     // const transferSolInstruction = SystemProgram.transfer({
@@ -201,95 +224,23 @@ export const POST = async (req: Request) => {
     //   lamports: amount * LAMPORTS_PER_SOL,
     // });
     // instructions.push(transferSolInstruction)
-  } else {
-    const decimals = splPubkeyMap[token][1]; // In the example, we use 6 decimals for USDC, but you can use any SPL token
-    const mintAddress = new PublicKey(`${splPubkeyMap[token][0]}`); // replace this with any SPL token mint address
-
-    // converting value to fractional units
-
-    let transferAmount: any = parseFloat(amount.toString());
-    transferAmount = transferAmount.toFixed(decimals);
-    transferAmount = transferAmount * Math.pow(10, decimals);
-
-    const fromTokenAccount = await splToken.getAssociatedTokenAddress(
-      mintAddress,
-      account,
-      false,
-      splToken.TOKEN_PROGRAM_ID,
-      splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
-    );
-
-    let toTokenAccount = await splToken.getAssociatedTokenAddress(
-      mintAddress,
-      toPubkey,
-      true,
-      splToken.TOKEN_PROGRAM_ID,
-      splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
-    );
-
-    const ifexists = await connection.getAccountInfo(toTokenAccount);
-
-    if (!ifexists || !ifexists.data) {
-      let createATAiX = splToken.createAssociatedTokenAccountInstruction(
-        account,
-        toTokenAccount,
-        toPubkey,
-        mintAddress,
-        splToken.TOKEN_PROGRAM_ID,
-        splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
-      );
-      instructions.push(createATAiX);
-    }
-
-    let transferInstruction = splToken.createTransferInstruction(
-      fromTokenAccount,
-      toTokenAccount,
-      account,
-      transferAmount,
-    );
-    instructions.push(transferInstruction);
   }
-
-  // get the latest blockhash amd block height
-  const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash();
-
-    console.log("add to t")
-    console.log(instructions)
-  // create a legacy transaction
-  const transaction = VersionedTransaction.deserialize(new Uint8Array(instructions[0]))
-  // const transaction = new Transaction({
-  //   feePayer: account,
-  //   blockhash,
-  //   lastValidBlockHeight,
-  // }).add(...instructions);
-      
-  const payload: ActionPostResponse = await createPostResponse({
-    fields: {
-      transaction,
-      message: successMsg,
-    },
-  });
-  
-  return Response.json(payload, {
-    headers: ACTIONS_CORS_HEADERS,
-  });
 };
 
 function validatedQueryParams(requestUrl: URL) {
-  let toPubkey: PublicKey = new PublicKey(
-    pubkeyToDonateTo,
-  );
+  // let toPubkey: PublicKey = new PublicKey(
+  //   pubkeyToDonateTo,
+  // );
   let amount: number = 0.1;
   let token: string = "SOL"
 
-  try {
-    if (requestUrl.searchParams.get('to')) {
-      toPubkey = new PublicKey(requestUrl.searchParams.get('to')!);
-    }
-  } catch (err) {
-    throw 'Invalid input query parameter: to';
-  }
+  // try {
+  //   if (requestUrl.searchParams.get('to')) {
+  //     toPubkey = new PublicKey(requestUrl.searchParams.get('to')!);
+  //   }
+  // } catch (err) {
+  //   throw 'Invalid input query parameter: to';
+  // }
 
   try {
     if (requestUrl.searchParams.get('amount')) {
@@ -314,6 +265,6 @@ function validatedQueryParams(requestUrl: URL) {
   return {
     token,
     amount,
-    toPubkey,
+    // toPubkey,
   };
 }
