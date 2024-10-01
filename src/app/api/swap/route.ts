@@ -18,8 +18,8 @@ import {
 import * as splToken from '@solana/spl-token';
 import axios from "axios";
 
-// import { createJupiterApiClient } from '@jup-ag/api';
-// const jupiterQuoteApi = createJupiterApiClient();
+import { createJupiterApiClient } from '@jup-ag/api';
+const jupiterQuoteApi = createJupiterApiClient();
 
 const splPubkeyMap: Record<string, [string, number]> = {
 ["MOTHER"]: ["3S8qX1MsMqRbiwKg2cQyx7nis1oHMgaCuc9c4VfvVdPN", 6],
@@ -29,10 +29,19 @@ const splPubkeyMap: Record<string, [string, number]> = {
 ["USDT"]: ["Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 6]
 }
 
-const pubkeyToDonateTo = '4ypD7kxRj9DLF3PMxsY3qvp8YdNhAHZRnN3fyVDh5CFX'
+const pubkeyToDonateTo = '5nNRHxEEQ5FtGzVEDADcgT6ovN398ZAymiiiZk48sR5h'
 const title = 'MOTHER for Mothers!'
 const desc = "Other tokens are swapped to MOTHER (powered by Jup.ag)"
 const successMsg = "Thank you for supporting your MOTHER!"
+
+interface SolanaPaySpecPostResponse {
+  transaction: string; // base64-encoded serialized transaction
+  message?: string; // the nature of the transaction response e.g. the name of an item being purchased
+  redirect?: string; // redirect URL after the transaction is successful
+}
+
+interface ActionsSpecPostResponse extends SolanaPaySpecPostResponse {
+}
 
 export const GET = async (req: Request) => {
   try {
@@ -119,6 +128,7 @@ export const POST = async (req: Request) => {
 
   const body: ActionPostRequest = await req.json();
 
+  const toAddressKey = new PublicKey(pubkeyToDonateTo)
   // validate the client provided input
   let account: PublicKey;
   try {
@@ -145,73 +155,60 @@ export const POST = async (req: Request) => {
 
   let instructions = [];
 
-  if (token == "SOL"){
-    console.log("SOL")
-    console.log(splPubkeyMap["MOTHER"][0])
-
+  if (token != "MOTHER"){
+    console.log(token)
     let inputToken; 
+    let transferAmount : any;
+
     if (token == "SOL") {
       inputToken = "So11111111111111111111111111111111111111112"
+      transferAmount = (amount * LAMPORTS_PER_SOL)
     } else {
       inputToken = splPubkeyMap[token][0]
+      console.log(inputToken)
+
+      const decimals = splPubkeyMap[token][1];
+      transferAmount = parseFloat(amount.toString());
+      transferAmount = transferAmount.toFixed(decimals);
+      transferAmount = transferAmount * Math.pow(10, decimals);
     }
 
-    // const quote = await jupiterQuoteApi.quoteGet({
-    //   inputMint: inputToken,
-    //   outputMint: splPubkeyMap["MOTHER"][0],
-    //   amount: (amount * LAMPORTS_PER_SOL),
-    //   autoSlippage: true,
-    //   maxAutoSlippageBps: 500, // 5%,
-    // });
-
-    // const swapResponse = await jupiterQuoteApi.swapPost({
-    //   swapRequest: {
-    //     quoteResponse: quote,
-    //     userPublicKey: body.account,
-    //     prioritizationFeeLamports: 'auto'
-    //   },
-    // })
-
-    const quoteResponse = await (
-      await fetch(`https://quote-api.jup.ag/v6/quote?inputMint=${inputToken}&outputMint=3S8qX1MsMqRbiwKg2cQyx7nis1oHMgaCuc9c4VfvVdPN&amount=${amount * LAMPORTS_PER_SOL}&slippageBps=50`
-      )
-    ).json();
-    
-    // get serialized transactions for the swap
-    const { swapTransaction } = await (
-      await fetch('https://quote-api.jup.ag/v6/swap', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          // quoteResponse from /quote api
-          quoteResponse,
-          // user public key to be used for the swap
-          userPublicKey: body.account,
-          // auto wrap and unwrap SOL. default is true
-          wrapAndUnwrapSol: true,
-          // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
-          // feeAccount: "fee_account_public_key"
-        })
-      })
-    ).json();
-
-    //console.log(swapResponse)
-    // const swapTransactionBuf = Buffer.from(swapResponse.swapTransaction, "base64");
-    // let transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-    // const serializedTransaction = Buffer.from(transaction.serialize());
-
-    const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
-
-    let transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-
-    const payload: ActionPostResponse = await createPostResponse({
-      fields: {
-        transaction: swapTransaction,
-        //message: successMsg,
-      },
+    const quote = await jupiterQuoteApi.quoteGet({
+      inputMint: inputToken,
+      outputMint: splPubkeyMap["MOTHER"][0],
+      amount: transferAmount,
+      autoSlippage: true,
+      maxAutoSlippageBps: 500, // 5%,
     });
+
+    let toTokenAccount = await splToken.getAssociatedTokenAddress(
+      new PublicKey(`${splPubkeyMap["MOTHER"][0]}`),
+      toAddressKey,
+      true,
+      splToken.TOKEN_PROGRAM_ID,
+      splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    const swapResponse = await jupiterQuoteApi.swapPost({
+      swapRequest: {
+        quoteResponse: quote,
+        userPublicKey: body.account,
+        destinationTokenAccount: toTokenAccount.toBase58(),
+        //feeAccount: body.account,
+        //trackingAccount: body.account,
+        prioritizationFeeLamports: 0,
+        dynamicComputeUnitLimit: true,
+        skipUserAccountsRpcCalls: true,
+        useSharedAccounts: true,
+      },
+    })
+    // const sTrans = VersionedTransaction.deserialize(Buffer.from(swapResponse.swapTransaction, "base64"))
+    // console.log(sTrans.message.compiledInstructions)
+
+    const payload: ActionsSpecPostResponse = {
+        transaction: swapResponse.swapTransaction,
+        message: successMsg,
+    };
     
     return Response.json(payload, {
       headers: ACTIONS_CORS_HEADERS,
@@ -224,6 +221,75 @@ export const POST = async (req: Request) => {
     //   lamports: amount * LAMPORTS_PER_SOL,
     // });
     // instructions.push(transferSolInstruction)
+  } else {
+    const decimals = splPubkeyMap[token][1];
+    const mintAddress = new PublicKey(`${splPubkeyMap[token][0]}`); // replace this with any SPL token mint address
+
+    // converting value to fractional units
+
+    let transferAmount: any = parseFloat(amount.toString());
+    transferAmount = transferAmount.toFixed(decimals);
+    transferAmount = transferAmount * Math.pow(10, decimals);
+
+    const fromTokenAccount = await splToken.getAssociatedTokenAddress(
+      mintAddress,
+      account,
+      true,
+      splToken.TOKEN_PROGRAM_ID,
+      splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    let toTokenAccount = await splToken.getAssociatedTokenAddress(
+      mintAddress,
+      toAddressKey,
+      true,
+      splToken.TOKEN_PROGRAM_ID,
+      splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+
+    const ifexists = await connection.getAccountInfo(toTokenAccount);
+
+    if (!ifexists || !ifexists.data) {
+      let createATAiX = splToken.createAssociatedTokenAccountInstruction(
+        account,
+        toTokenAccount,
+        toAddressKey,
+        mintAddress,
+        splToken.TOKEN_PROGRAM_ID,
+        splToken.ASSOCIATED_TOKEN_PROGRAM_ID,
+      );
+      instructions.push(createATAiX);
+    }
+
+    let transferInstruction = splToken.createTransferInstruction(
+      fromTokenAccount,
+      toTokenAccount,
+      account,
+      transferAmount,
+    );
+    instructions.push(transferInstruction);
+
+    // get the latest blockhash amd block height
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash();
+
+    // create a legacy transaction
+    const transaction = new Transaction({
+      feePayer: account,
+      blockhash,
+      lastValidBlockHeight,
+    }).add(...instructions);
+
+    const payload: ActionPostResponse = await createPostResponse({
+      fields: {
+        transaction,
+        message: successMsg,
+      },
+    });
+    
+    return Response.json(payload, {
+      headers: ACTIONS_CORS_HEADERS,
+    });
   }
 };
 
