@@ -9,10 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@dialectlabs/blinks": "^0.13.0-beta.0",
     "@jup-ag/api": "^6.0.29",
     "@solana/actions": "^1.6.4",
     "@solana/actions-spec": "^2.4.0",
     "@solana/spl-token": "^0.4.8",
+    "@solana/wallet-adapter-base": "^0.9.23",
+    "@solana/wallet-adapter-react": "^0.15.35",
+    "@solana/wallet-adapter-react-ui": "^0.9.35",
+    "@solana/wallet-adapter-wallets": "^0.19.32",
     "@solana/web3.js": "^1.95.3",
     "axios": "^1.7.7",
     "next": "14.2.13",

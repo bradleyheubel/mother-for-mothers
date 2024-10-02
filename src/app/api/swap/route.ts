@@ -87,6 +87,7 @@ export const GET = async (req: Request) => {
           {
             label: 'Donate', // button text
             href: `${baseHref}token={token}&amount={amount}`, // this href will have a text input
+            type: 'transaction', // added type property
             parameters: [
               {
                 type: "select",
@@ -284,6 +285,7 @@ export const POST = async (req: Request) => {
       fields: {
         transaction,
         message: successMsg,
+        type: "transaction"
       },
     });
     
